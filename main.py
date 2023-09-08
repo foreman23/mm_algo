@@ -1,5 +1,3 @@
-import os
-
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
@@ -18,19 +16,42 @@ firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 
-
-def getWaitingPool():
+@firestore.transactional
+def getWaitingPool(transaction):
     """
     Returns the current uids in the waiting pool from firestore
     """
     doc_ref = db.collection("pairing_system").document("waiting")
-    doc = doc_ref.get()
-    if doc.exists:
-        waitingPool = doc.to_dict()
+    snapshot = doc_ref.get(transaction=transaction)
+    # doc = doc_ref.get()
+    if snapshot.exists:
+        waitingPool = snapshot.to_dict()
         return waitingPool
 
     else:
         print("No such document!")
+
+
+def timestampMatchFound(uid1, uid2, pairID):
+    dt = datetime.utcnow()
+
+    # Dictionary for pairID and dt
+    pair_info = {
+        "pairID": pairID,
+        "timestamp": dt
+    }
+
+    # Update or create the "matches" document in the "pairing" subcollection for user 1
+    doc_ref_user1 = db.collection("userInfo").document(uid1)
+    doc_ref_user1.collection("pairing").document("matches").set({}, merge=True)
+    doc_ref_user1.collection("pairing").document("matches").update(
+        {"pairArr": firestore.ArrayUnion([pair_info])})
+
+    # Update or create the "matches" document in the "pairing" subcollection for user 2
+    doc_ref_user2 = db.collection("userInfo").document(uid2)
+    doc_ref_user2.collection("pairing").document("matches").set({}, merge=True)
+    doc_ref_user2.collection("pairing").document("matches").update(
+        {"pairArr": firestore.ArrayUnion([pair_info])})
 
 
 @app.route("/match")
@@ -38,7 +59,8 @@ def pairUsers():
     """
     Pairs users from the waiting pool
     """
-    waitingPool = getWaitingPool()
+    transaction = db.transaction()
+    waitingPool = getWaitingPool(transaction)
     pair = []
     for uid in waitingPool["uidArr"]:
         print("Pairing...")
@@ -67,7 +89,6 @@ def pairUsers():
         doc_ref.update({"uidArr": firestore.ArrayRemove([pair[0]])})
         doc_ref.update({"uidArr": firestore.ArrayRemove([pair[1]])})
 
-
         # Create empty map with uid arrays for holding user messages
         doc_ref2.update({
             pairID: {
@@ -85,36 +106,11 @@ def pairUsers():
         return "Could not find pair..."
 
 
-def timestampMatchFound(uid1, uid2, pairID):
-    dt = datetime.utcnow()
-
-    # Dictionary for pairID and dt
-    pair_info = {
-        "pairID": pairID,
-        "timestamp": dt
-    }
-
-    # Update or create the "matches" document in the "pairing" subcollection for user 1
-    doc_ref_user1 = db.collection("userInfo").document(uid1)
-    doc_ref_user1.collection("pairing").document("matches").set({}, merge=True)
-    doc_ref_user1.collection("pairing").document("matches").update(
-        {"pairArr": firestore.ArrayUnion([pair_info])})
-
-    # Update or create the "matches" document in the "pairing" subcollection for user 2
-    doc_ref_user2 = db.collection("userInfo").document(uid2)
-    doc_ref_user2.collection("pairing").document("matches").set({}, merge=True)
-    doc_ref_user2.collection("pairing").document("matches").update(
-        {"pairArr": firestore.ArrayUnion([pair_info])})
-
-
 @app.route("/")
 def greeting():
     return "<p>Valid routes: /match</p>"
 
+
 @app.route("/test")
 def test():
     return "test"
-
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
