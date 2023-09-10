@@ -3,6 +3,9 @@ from firebase_admin import credentials
 from firebase_admin import firestore
 from firebase_admin import auth
 
+import asyncio
+
+
 from datetime import datetime
 
 from flask import Flask
@@ -52,10 +55,21 @@ def timestampMatchFound(uid1, uid2, pairID):
     doc_ref_user2.collection("pairing").document("matches").set({}, merge=True)
     doc_ref_user2.collection("pairing").document("matches").update(
         {"pairArr": firestore.ArrayUnion([pair_info])})
+    
+
+async def createDocument(col_ref, pairID):
+    data = {}
+    chat_ref = col_ref.document(pairID)
+    chat_ref.set(data)
+
+async def createSubCollection(pairID):
+    chat_ref = db.collection("chat_rooms").document(pairID)
+    dummy_doc_ref = chat_ref.collection('messages').document('(dummy_message)')
+    dummy_doc_ref.set({})
 
 
 @app.route("/match")
-def pairUsers():
+async def pairUsers():
     """
     Pairs users from the waiting pool
     """
@@ -72,16 +86,26 @@ def pairUsers():
         print("Pair found:", pair[0], ":", pair[1])
 
         doc_ref = db.collection("pairing_system").document("waiting")
-        doc_ref2 = db.collection("pairing_system").document("pairs")
+        col_ref = db.collection("chat_rooms")
 
         # Get the document data
-        doc_data = doc_ref2.get().to_dict()
+        # doc_data = doc_ref2.get().to_dict()
 
         # Append the uids to new array within pairs document
         pairID = pair[0] + "_" + pair[1]
 
         # Check if matched with this user previously
-        if (pairID in doc_data or (pair[1] + "_" + pair[0]) in doc_data):
+        # if (pairID in doc_data or (pair[1] + "_" + pair[0]) in doc_data):
+        #     return "Duplicate match! Trying again.."
+
+        # Query db to check if matched with this user previously
+        query_ref = col_ref.document(pairID)
+        query = query_ref.get()
+        if query.exists:
+            return "Duplicate match! Trying again.."
+        query_ref2 = col_ref.document(pair[1] + "_" + pair[0])
+        query2 = query_ref2.get()
+        if query2.exists:
             return "Duplicate match! Trying again.."
 
         # Remove uids from the waiting list
@@ -89,13 +113,11 @@ def pairUsers():
         doc_ref.update({"uidArr": firestore.ArrayRemove([pair[0]])})
         doc_ref.update({"uidArr": firestore.ArrayRemove([pair[1]])})
 
-        # Create empty map with uid arrays for holding user messages
-        doc_ref2.update({
-            pairID: {
-                pair[0]: [],
-                pair[1]: [],
-            }
-        })
+        # Create new chat document within chat_rooms collection
+        await createDocument(col_ref, pairID)
+
+        # Call function to create subcollection
+        await createSubCollection(pairID)
 
         # Create a timestamp for last found match in users' firestore docs
         timestampMatchFound(pair[0], pair[1], pairID)
