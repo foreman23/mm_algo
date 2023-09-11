@@ -62,7 +62,7 @@ async def createDocument(col_ref, pairID):
     chat_ref = col_ref.document(pairID)
     chat_ref.set(data)
 
-async def createSubCollection(pairID):
+def createSubCollection(pairID):
     chat_ref = db.collection("chat_rooms").document(pairID)
     dummy_doc_ref = chat_ref.collection('messages').document('(dummy_message)')
     dummy_doc_ref.set({})
@@ -117,7 +117,7 @@ async def pairUsers():
         await createDocument(col_ref, pairID)
 
         # Call function to create subcollection
-        await createSubCollection(pairID)
+        createSubCollection(pairID)
 
         # Create a timestamp for last found match in users' firestore docs
         timestampMatchFound(pair[0], pair[1], pairID)
